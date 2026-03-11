@@ -2,49 +2,34 @@ const puppeteer = require('puppeteer-extra')
 const StealthPlugin = require('puppeteer-extra-plugin-stealth')
 puppeteer.use(StealthPlugin())
 
-// Map country codes / names to Google domain + locale
 const COUNTRY_CONFIG = {
-  nl: { domain: 'https://www.google.nl', hl: 'nl', gl: 'nl' },
-  netherlands: { domain: 'https://www.google.nl', hl: 'nl', gl: 'nl' },
-  de: { domain: 'https://www.google.de', hl: 'de', gl: 'de' },
-  germany: { domain: 'https://www.google.de', hl: 'de', gl: 'de' },
-  uk: { domain: 'https://www.google.co.uk', hl: 'en', gl: 'gb' },
-  gb: { domain: 'https://www.google.co.uk', hl: 'en', gl: 'gb' },
-  fr: { domain: 'https://www.google.fr', hl: 'fr', gl: 'fr' },
-  france: { domain: 'https://www.google.fr', hl: 'fr', gl: 'fr' },
-  be: { domain: 'https://www.google.be', hl: 'nl', gl: 'be' },
-  belgium: { domain: 'https://www.google.be', hl: 'nl', gl: 'be' },
-  es: { domain: 'https://www.google.es', hl: 'es', gl: 'es' },
-  spain: { domain: 'https://www.google.es', hl: 'es', gl: 'es' },
-  it: { domain: 'https://www.google.it', hl: 'it', gl: 'it' },
-  italy: { domain: 'https://www.google.it', hl: 'it', gl: 'it' },
-  pl: { domain: 'https://www.google.pl', hl: 'pl', gl: 'pl' },
-  poland: { domain: 'https://www.google.pl', hl: 'pl', gl: 'pl' },
-  us: { domain: 'https://www.google.com', hl: 'en', gl: 'us' },
+  nl: { base: 'https://nl.indeed.com', path: 'vacatures' },
+  netherlands: { base: 'https://nl.indeed.com', path: 'vacatures' },
+  de: { base: 'https://de.indeed.com', path: 'jobs' },
+  germany: { base: 'https://de.indeed.com', path: 'jobs' },
+  uk: { base: 'https://uk.indeed.com', path: 'jobs' },
+  gb: { base: 'https://uk.indeed.com', path: 'jobs' },
+  fr: { base: 'https://fr.indeed.com', path: 'emplois' },
+  france: { base: 'https://fr.indeed.com', path: 'emplois' },
+  be: { base: 'https://be.indeed.com', path: 'vacatures' },
+  belgium: { base: 'https://be.indeed.com', path: 'vacatures' },
+  es: { base: 'https://es.indeed.com', path: 'empleos' },
+  it: { base: 'https://it.indeed.com', path: 'lavori' },
+  us: { base: 'https://www.indeed.com', path: 'jobs' },
 }
 
 const DEFAULT_COUNTRY = process.env.DEFAULT_COUNTRY || 'nl'
 
-function getCountryConfig(location = '') {
+function getConfig(location = '') {
   const loc = location.toLowerCase().trim()
-
-  // Check if location matches a known country key
-  for (const [key, config] of Object.entries(COUNTRY_CONFIG)) {
-    if (loc === key || loc.endsWith(`, ${key}`) || loc.endsWith(` ${key}`)) {
-      return config
-    }
+  for (const [key, cfg] of Object.entries(COUNTRY_CONFIG)) {
+    if (loc === key || loc.endsWith(`, ${key}`) || loc.endsWith(` ${key}`)) return cfg
   }
-
-  // Default to configured country
   return COUNTRY_CONFIG[DEFAULT_COUNTRY] || COUNTRY_CONFIG.nl
 }
 
-async function scrapeGoogleJobs(query, location = '', num = 10) {
-  const countryConfig = getCountryConfig(location)
-  const searchQuery = location ? `${query} ${location}` : query
-  const url = `${countryConfig.domain}/search?q=${encodeURIComponent(searchQuery)}&ibp=htl;jobs&hl=${countryConfig.hl}&gl=${countryConfig.gl}&num=${num}`
-
-  const launchOptions = {
+function getLaunchOptions() {
+  const opts = {
     headless: true,
     args: [
       '--no-sandbox',
@@ -55,12 +40,19 @@ async function scrapeGoogleJobs(query, location = '', num = 10) {
       '--disable-blink-features=AutomationControlled',
     ],
   }
-  // Use system Chromium when running in Docker/Railway
   if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH
+    opts.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH
   }
+  return opts
+}
 
-  const browser = await puppeteer.launch(launchOptions)
+async function scrapeJobs(query, location = '', num = 10) {
+  const cfg = getConfig(location)
+  const params = new URLSearchParams({ q: query, limit: num })
+  if (location) params.set('l', location)
+  const url = `${cfg.base}/${cfg.path}?${params}`
+
+  const browser = await puppeteer.launch(getLaunchOptions())
 
   try {
     const page = await browser.newPage()
@@ -69,162 +61,81 @@ async function scrapeGoogleJobs(query, location = '', num = 10) {
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
     )
 
-    // Block images/fonts/media to speed things up
     await page.setRequestInterception(true)
     page.on('request', (req) => {
-      if (['image', 'font', 'media', 'stylesheet'].includes(req.resourceType())) {
-        req.abort()
-      } else {
-        req.continue()
-      }
+      if (['image', 'font', 'media'].includes(req.resourceType())) req.abort()
+      else req.continue()
     })
 
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
 
-    // Google EU domains redirect to consent.google.com before showing results.
-    // Accept it, wait for the redirect back, then re-navigate to our search URL.
-    if (page.url().includes('consent.google') || page.url().includes('accounts.google')) {
-      const consentSelectors = ['#L2AGLb', 'button[aria-label*="Accept"]', 'button[aria-label*="Accepteren"]', 'button[aria-label*="Akzeptieren"]', 'button[aria-label*="Accepter"]', 'form[action*="save"] button']
-      for (const sel of consentSelectors) {
-        const btn = await page.$(sel)
-        if (btn) {
-          await btn.click()
-          await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {})
-          break
-        }
-      }
-      // Re-navigate to the actual search URL now that consent is accepted
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
-    }
+    // Dismiss cookie banner if present (no navigation — Indeed just hides it)
+    await page.evaluate(() => {
+      const btn = document.querySelector(
+        '#onetrust-accept-btn-handler, button[id*="accept"], button[class*="accept-btn"]'
+      )
+      if (btn) btn.click()
+    }).catch(() => {})
 
-    // Wait for dynamic job content to render
-    await new Promise((r) => setTimeout(r, 2500))
+    await new Promise((r) => setTimeout(r, 1500))
 
-    const jobs = await page.evaluate((maxNum) => {
+    const jobs = await page.evaluate((maxNum, base) => {
       const results = []
+      const cards = [...document.querySelectorAll('div.job_seen_beacon')].slice(0, maxNum)
 
-      // Try multiple known job card selectors — Google rotates class names
-      const cardSelectors = [
-        'li.iFjolb',
-        'li[data-cjid]',
-        '.PwjeAc li',
-        'g-scrolling-carousel li',
-        '[jsname="fEHEpb"]',
-        '.nJXhWc',
-        '.WpKAof li',
-      ]
+      for (const card of cards) {
+        // Title
+        const titleEl = card.querySelector('h2.jobTitle a span[title], span[id^="jobTitle-"]')
+        const title = titleEl?.getAttribute('title') || titleEl?.textContent?.trim() || ''
 
-      let cards = []
-      for (const sel of cardSelectors) {
-        cards = [...document.querySelectorAll(sel)]
-        if (cards.length > 0) break
-      }
+        // Company
+        const company =
+          card.querySelector('[data-testid="company-name"]')?.textContent?.trim() || ''
 
-      // Helper: try multiple selectors and return first match text
-      const getText = (el, sels) => {
-        for (const s of sels) {
-          const text = el.querySelector(s)?.textContent?.trim()
-          if (text) return text
-        }
-        return ''
-      }
+        // Location
+        const location =
+          card.querySelector('[data-testid="text-location"]')?.textContent?.trim() || ''
 
-      // Helper: get link from card
-      const getLink = (el) => {
-        const a = el.querySelector('a[href^="http"]') || el.querySelector('a[href^="/url"]')
-        if (!a) return ''
-        const href = a.getAttribute('href')
-        if (!href) return ''
-        if (href.startsWith('http')) return href
-        // Decode Google redirect URLs
-        const match = href.match(/[?&]q=([^&]+)/)
-        if (match) return decodeURIComponent(match[1])
-        return ''
-      }
+        // Schedule type — first attribute snippet (often Fulltime/Parttime)
+        const scheduleEl = card.querySelector(
+          'li[data-testid="attribute_snippet_testid"] span.css-zydy3i'
+        )
+        const scheduleType = scheduleEl?.textContent?.trim().replace(/\+\d+$/, '').trim() || ''
 
-      for (const card of cards.slice(0, maxNum)) {
-        const title = getText(card, [
-          '.BjJfJf',
-          'h3',
-          '[role="heading"]',
-          '.p1N2lc',
-          '.r0bn4c',
-          '.sH3zFd',
-        ])
+        // Snippet / description
+        const snippet =
+          card.querySelector('.job-snippet, [class*="snippet"], ul.jobCardShelfContainer')
+            ?.textContent?.trim() || ''
 
-        const company = getText(card, [
-          '.vNEEBe',
-          '.B8cu5c',
-          '.Q9PYT',
-          '.waQ0qd',
-          '.nJlQNd',
-          '.MRLnJd',
-        ])
+        // Posted date
+        const postedAt =
+          card.querySelector('[class*="date"], span.date, .jobCardFooterItem')
+            ?.textContent?.trim() || ''
 
-        const location = getText(card, [
-          '.Qk80Jf',
-          '.KKh3md',
-          '.GkXYNd',
-          '.MRLnJd span:last-child',
-          '.HBvzbc',
-        ])
-
-        const postedAt = getText(card, [
-          '.LL4CDc span',
-          '.SuWscb',
-          '.PtODJe',
-          'span[class*="ago"]',
-          '[class*="posted"]',
-        ])
-
-        const scheduleType = getText(card, [
-          '.HBvzbc',
-          '.Gve2Ub',
-          '.vjbqh',
-          'span[class*="type"]',
-          'span[class*="schedule"]',
-          'span[class*="employment"]',
-        ])
-
-        // Description: grab all meaningful text from the card, strip the above fields
-        const rawText = card.textContent?.trim() || ''
-        const description = rawText
-          .replace(title, '')
-          .replace(company, '')
-          .replace(location, '')
-          .replace(postedAt, '')
-          .replace(scheduleType, '')
-          .replace(/\s+/g, ' ')
-          .trim()
-          .slice(0, 600)
-
-        const link = getLink(card)
+        // Apply link — use the stable viewjob URL
+        const jkAttr = card.querySelector('a[data-jk]')?.getAttribute('data-jk')
+        const link = jkAttr ? `${base}/viewjob?jk=${jkAttr}` : ''
 
         if (title && company) {
           results.push({
             title,
             company_name: company,
             location,
-            description,
+            description: snippet,
             detected_extensions: {
               posted_at: postedAt,
               schedule_type: scheduleType,
             },
-            related_links: link ? [{ link, text: 'Apply' }] : [],
+            related_links: link ? [{ link, text: 'Apply on Indeed' }] : [],
           })
         }
       }
 
       return results
-    }, num)
+    }, num, cfg.base)
 
     return {
-      search_metadata: {
-        query,
-        location,
-        google_domain: countryConfig.domain,
-        status: 'Success',
-      },
+      search_metadata: { query, location, source: cfg.base, status: jobs.length > 0 ? 'Success' : 'No results' },
       jobs_results: jobs,
     }
   } catch (err) {
@@ -238,4 +149,4 @@ async function scrapeGoogleJobs(query, location = '', num = 10) {
   }
 }
 
-module.exports = { scrapeGoogleJobs }
+module.exports = { scrapeGoogleJobs: scrapeJobs }
