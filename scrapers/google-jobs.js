@@ -81,24 +81,20 @@ async function scrapeGoogleJobs(query, location = '', num = 10) {
 
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
 
-    // Dismiss EU cookie consent banners — clicking causes a reload so we
-    // handle navigation and wait for it to settle before scraping.
-    const cookieSelectors = [
-      'button[aria-label*="Accept"]',
-      'button[aria-label*="Accepteren"]',
-      'button[aria-label*="Akzeptieren"]',
-      'button[aria-label*="Accepter"]',
-      '#L2AGLb',   // Google's "Accept all" button id
-    ]
-    for (const sel of cookieSelectors) {
-      const btn = await page.$(sel)
-      if (btn) {
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => {}),
-          btn.click(),
-        ])
-        break
+    // Google EU domains redirect to consent.google.com before showing results.
+    // Accept it, wait for the redirect back, then re-navigate to our search URL.
+    if (page.url().includes('consent.google') || page.url().includes('accounts.google')) {
+      const consentSelectors = ['#L2AGLb', 'button[aria-label*="Accept"]', 'button[aria-label*="Accepteren"]', 'button[aria-label*="Akzeptieren"]', 'button[aria-label*="Accepter"]', 'form[action*="save"] button']
+      for (const sel of consentSelectors) {
+        const btn = await page.$(sel)
+        if (btn) {
+          await btn.click()
+          await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {})
+          break
+        }
       }
+      // Re-navigate to the actual search URL now that consent is accepted
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
     }
 
     // Wait for dynamic job content to render
