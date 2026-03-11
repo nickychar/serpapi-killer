@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SerpAPI Killer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f0f0f;
+      color: #e8e8e8;
+      min-height: 100vh;
+    }
+
+    header {
+      padding: 28px 40px 20px;
+      border-bottom: 1px solid #222;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    header h1 {
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -0.3px;
+    }
+
+    header .badge {
+      font-size: 11px;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #888;
+      padding: 2px 8px;
+      border-radius: 99px;
+    }
+
+    .skull { font-size: 22px; }
+
+    .container { max-width: 900px; margin: 0 auto; padding: 40px 24px; }
+
+    .search-bar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    input, select {
+      background: #1a1a1a;
+      border: 1px solid #2e2e2e;
+      color: #e8e8e8;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    input:focus, select:focus { border-color: #555; }
+
+    input[name="q"] { flex: 1; }
+    input[name="location"] { width: 200px; }
+    select[name="country"] { width: 160px; }
+
+    button {
+      background: #fff;
+      color: #000;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 20px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+
+    button:hover { opacity: 0.85; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .hint {
+      font-size: 12px;
+      color: #555;
+      margin-bottom: 32px;
+    }
+
+    .status {
+      font-size: 13px;
+      color: #666;
+      margin-bottom: 24px;
+      min-height: 20px;
+    }
+
+    .status.error { color: #f87171; }
+
+    .jobs-grid { display: flex; flex-direction: column; gap: 12px; }
+
+    .job-card {
+      background: #141414;
+      border: 1px solid #222;
+      border-radius: 12px;
+      padding: 18px 20px;
+      transition: border-color 0.15s;
+    }
+
+    .job-card:hover { border-color: #3a3a3a; }
+
+    .job-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      color: #f0f0f0;
+    }
+
+    .job-meta {
+      font-size: 13px;
+      color: #888;
+      margin-bottom: 10px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .job-meta .company { color: #bbb; font-weight: 500; }
+
+    .tag {
+      font-size: 11px;
+      background: #1e1e1e;
+      border: 1px solid #2e2e2e;
+      color: #777;
+      padding: 2px 8px;
+      border-radius: 99px;
+    }
+
+    .job-description {
+      font-size: 13px;
+      color: #666;
+      line-height: 1.6;
+      margin-bottom: 12px;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .job-footer { display: flex; justify-content: flex-end; }
+
+    .apply-btn {
+      font-size: 12px;
+      font-weight: 500;
+      color: #aaa;
+      text-decoration: none;
+      border: 1px solid #2e2e2e;
+      padding: 5px 12px;
+      border-radius: 6px;
+      transition: all 0.15s;
+      background: transparent;
+    }
+
+    .apply-btn:hover { border-color: #555; color: #fff; }
+
+    .spinner {
+      display: none;
+      width: 18px; height: 18px;
+      border: 2px solid #333;
+      border-top-color: #888;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      margin: 40px auto;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .raw-toggle {
+      font-size: 12px;
+      color: #444;
+      cursor: pointer;
+      margin-top: 32px;
+      text-align: center;
+    }
+
+    .raw-toggle:hover { color: #666; }
+
+    pre {
+      display: none;
+      background: #111;
+      border: 1px solid #222;
+      border-radius: 8px;
+      padding: 16px;
+      font-size: 12px;
+      color: #666;
+      overflow: auto;
+      margin-top: 12px;
+      max-height: 400px;
+    }
+
+    .empty {
+      text-align: center;
+      color: #444;
+      font-size: 14px;
+      padding: 60px 0;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <span class="skull">💀</span>
+  <h1>SerpAPI Killer</h1>
+  <span class="badge">local · NL-first</span>
+</header>
+
+<div class="container">
+  <form id="searchForm">
+    <div class="search-bar">
+      <input name="q" type="text" placeholder="Job title or keyword…" required autocomplete="off" />
+      <input name="location" type="text" placeholder="City, country…" />
+      <select name="country">
+        <option value="nl">🇳🇱 Netherlands</option>
+        <option value="de">🇩🇪 Germany</option>
+        <option value="uk">🇬🇧 United Kingdom</option>
+        <option value="fr">🇫🇷 France</option>
+        <option value="be">🇧🇪 Belgium</option>
+        <option value="es">🇪🇸 Spain</option>
+        <option value="it">🇮🇹 Italy</option>
+        <option value="us">🇺🇸 United States</option>
+      </select>
+      <button type="submit" id="searchBtn">Search</button>
+    </div>
+    <div class="hint">Searches Google Jobs via your local scraper — no API key needed.</div>
+  </form>
+
+  <div class="status" id="status"></div>
+  <div class="spinner" id="spinner"></div>
+  <div class="jobs-grid" id="results"></div>
+
+  <div class="raw-toggle" id="rawToggle" style="display:none" onclick="toggleRaw()">Show raw JSON ↓</div>
+  <pre id="rawJson"></pre>
+</div>
+
+<script>
+  let lastData = null
+
+  document.getElementById('searchForm').addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const form = e.target
+    const q = form.q.value.trim()
+    const location = form.location.value.trim()
+    const country = form.country.value
+
+    const btn = document.getElementById('searchBtn')
+    const status = document.getElementById('status')
+    const spinner = document.getElementById('spinner')
+    const results = document.getElementById('results')
+    const rawToggle = document.getElementById('rawToggle')
+    const rawJson = document.getElementById('rawJson')
+
+    btn.disabled = true
+    status.textContent = 'Scraping Google Jobs…'
+    status.className = 'status'
+    spinner.style.display = 'block'
+    results.innerHTML = ''
+    rawToggle.style.display = 'none'
+    rawJson.style.display = 'none'
+
+    try {
+      const params = new URLSearchParams({ engine: 'google_jobs', q, num: 10 })
+      if (location) params.set('location', location)
+      // Append country as a hint for the scraper
+      params.set('country', country)
+
+      const res = await fetch(`/search?${params}`)
+      const data = await res.json()
+      lastData = data
+
+      if (data.error) throw new Error(data.error)
+
+      const jobs = data.jobs_results || []
+      status.textContent = `${jobs.length} job${jobs.length !== 1 ? 's' : ''} found`
+
+      if (jobs.length === 0) {
+        results.innerHTML = '<div class="empty">No jobs found. Try a different keyword or location.</div>'
+      } else {
+        results.innerHTML = jobs.map(job => `
+          <div class="job-card">
+            <div class="job-title">${esc(job.title)}</div>
+            <div class="job-meta">
+              <span class="company">${esc(job.company_name)}</span>
+              ${job.location ? `<span>${esc(job.location)}</span>` : ''}
+              ${job.detected_extensions?.posted_at ? `<span class="tag">${esc(job.detected_extensions.posted_at)}</span>` : ''}
+              ${job.detected_extensions?.schedule_type ? `<span class="tag">${esc(job.detected_extensions.schedule_type)}</span>` : ''}
+            </div>
+            ${job.description ? `<div class="job-description">${esc(job.description)}</div>` : ''}
+            ${job.related_links?.[0]?.link ? `
+              <div class="job-footer">
+                <a class="apply-btn" href="${esc(job.related_links[0].link)}" target="_blank" rel="noopener">Apply →</a>
+              </div>` : ''}
+          </div>
+        `).join('')
+      }
+
+      rawToggle.style.display = 'block'
+      rawJson.textContent = JSON.stringify(data, null, 2)
+    } catch (err) {
+      status.textContent = `Error: ${err.message}`
+      status.className = 'status error'
+    } finally {
+      btn.disabled = false
+      spinner.style.display = 'none'
+    }
+  })
+
+  function toggleRaw() {
+    const pre = document.getElementById('rawJson')
+    const toggle = document.getElementById('rawToggle')
+    if (pre.style.display === 'none' || !pre.style.display) {
+      pre.style.display = 'block'
+      toggle.textContent = 'Hide raw JSON ↑'
+    } else {
+      pre.style.display = 'none'
+      toggle.textContent = 'Show raw JSON ↓'
+    }
+  }
+
+  function esc(str) {
+    return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+  }
+</script>
+</body>
+</html>
